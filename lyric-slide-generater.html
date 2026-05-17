@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>PrincessTG Lyric PNG Generator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: white;
+      padding: 20px;
+    }
+
+    input, textarea, button {
+      width: 100%;
+      margin: 10px 0;
+      padding: 12px;
+      font-size: 16px;
+    }
+
+    textarea {
+      height: 300px;
+    }
+
+    button {
+      background: #ff4fd8;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background: #ff7de3;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>PrincessTG Lyric PNG Generator</h1>
+
+  <label>Upload Background PNG:</label>
+  <input type="file" id="bgUpload" accept="image/png,image/jpeg">
+
+  <label>Song Name:</label>
+  <input type="text" id="songName" placeholder="Enter song name">
+
+  <label>Lyrics:</label>
+  <textarea id="lyrics" placeholder="Paste lyrics here. Separate sections with a blank line."></textarea>
+
+  <button onclick="generatePNGs()">Generate and Download PNGs</button>
+
+  <canvas id="canvas" width="1920" height="1080" style="display:none;"></canvas>
+
+  <script>
+    async function generatePNGs() {
+      const fileInput = document.getElementById("bgUpload");
+      const songName = document.getElementById("songName").value.trim();
+      const lyricsText = document.getElementById("lyrics").value.trim();
+
+      if (!fileInput.files[0]) {
+        alert("Please upload a PNG background.");
+        return;
+      }
+
+      if (!songName) {
+        alert("Please enter a song name.");
+        return;
+      }
+
+      if (!lyricsText) {
+        alert("Please paste lyrics.");
+        return;
+      }
+
+      const bgImage = await loadImage(fileInput.files[0]);
+      const sections = lyricsText
+        .split(/\n\s*\n/)
+        .map(section => section.trim())
+        .filter(section => section.length > 0);
+
+      const zip = new JSZip();
+
+      const titleSlide = `${songName}\nby PrincessTG`;
+      const titleBlob = await createSlide(bgImage, titleSlide, true);
+      zip.file("00-title.png", titleBlob);
+
+      for (let i = 0; i < sections.length; i++) {
+        const blob = await createSlide(bgImage, sections[i], false);
+        const fileName = String(i + 1).padStart(2, "0") + "-lyrics.png";
+        zip.file(fileName, blob);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      downloadBlob(zipBlob, `${songName}-lyric-slides.zip`);
+    }
+
+    function loadImage(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    function createSlide(bgImage, text, isTitle) {
+      return new Promise(resolve => {
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "white";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        const fontSize = isTitle ? 82 : 58;
+        ctx.font = `bold ${fontSize}px Arial`;
+
+        drawWrappedText(
+          ctx,
+          text,
+          canvas.width / 2,
+          canvas.height / 2,
+          canvas.width * 0.78,
+          fontSize * 1.35
+        );
+
+        canvas.toBlob(blob => resolve(blob), "image/png");
+      });
+    }
+
+    function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
+      const lines = [];
+
+      text.split("\n").forEach(paragraph => {
+        const words = paragraph.split(" ");
+        let line = "";
+
+        words.forEach(word => {
+          const testLine = line + word + " ";
+          const width = ctx.measureText(testLine).width;
+
+          if (width > maxWidth && line !== "") {
+            lines.push(line.trim());
+            line = word + " ";
+          } else {
+            line = testLine;
+          }
+        });
+
+        lines.push(line.trim());
+      });
+
+      const startY = y - ((lines.length - 1) * lineHeight) / 2;
+
+      lines.forEach((line, index) => {
+        ctx.fillText(line, x, startY + index * lineHeight);
+      });
+    }
+
+    function downloadBlob(blob, fileName) {
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+
+</body>
+</html>
