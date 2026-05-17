@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>PrincessTG Lyric PNG Generator</title>
+  <title>Lyric PNG Generator</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
   <style>
@@ -13,15 +13,16 @@
       padding: 20px;
     }
 
-    input, textarea, button {
+    input, textarea, button, select {
       width: 100%;
-      margin: 10px 0;
+      margin: 8px 0;
       padding: 12px;
       font-size: 16px;
+      box-sizing: border-box;
     }
 
     textarea {
-      height: 300px;
+      height: 180px;
     }
 
     button {
@@ -30,38 +31,101 @@
       border: none;
       cursor: pointer;
       font-weight: bold;
+      border-radius: 8px;
     }
 
     button:hover {
       background: #ff7de3;
     }
+
+    .slideBox {
+      border: 1px solid #444;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 10px;
+      background: #1b1b1b;
+    }
+
+    .smallButton {
+      width: auto;
+      padding: 10px 18px;
+      margin-right: 8px;
+    }
   </style>
 </head>
+
 <body>
 
-  <h1>PrincessTG Lyric PNG Generator</h1>
+  <h1>Lyric PNG Generator</h1>
 
-  <label>Upload Background PNG:</label>
-  <input type="file" id="bgUpload" accept="image/png,image/jpeg">
+  <label>Default Background PNG:</label>
+  <input type="file" id="defaultBg" accept="image/png,image/jpeg">
 
   <label>Song Name:</label>
-  <input type="text" id="songName" placeholder="Enter song name">
+  <input type="text" id="songName" placeholder="Song name">
+
+  <label>Author / Artist:</label>
+  <input type="text" id="authorName" placeholder="PrincessTG">
 
   <label>Lyrics:</label>
   <textarea id="lyrics" placeholder="Paste lyrics here. Separate sections with a blank line."></textarea>
 
+  <h2>Optional Custom Slides</h2>
+  <p>Use these only if you want extra slides before or after the lyrics.</p>
+
+  <div id="customSlidesContainer"></div>
+
+  <button class="smallButton" onclick="addCustomSlide()">Add Custom Slide</button>
+
+  <hr>
+
   <button onclick="generatePNGs()">Generate and Download PNGs</button>
 
-  <canvas id="canvas" width="1920" height="1080" style="display:none;"></canvas>
+  <canvas id="canvas" width="1280" height="720" style="display:none;"></canvas>
 
   <script>
+    let customSlideCount = 0;
+
+    function addCustomSlide() {
+      customSlideCount++;
+
+      const container = document.getElementById("customSlidesContainer");
+
+      const box = document.createElement("div");
+      box.className = "slideBox";
+
+      box.innerHTML = `
+        <h3>Custom Slide ${customSlideCount}</h3>
+
+        <label>Where should this slide go?</label>
+        <select class="customPosition">
+          <option value="before">Before lyrics</option>
+          <option value="after">After lyrics</option>
+        </select>
+
+        <label>Slide Label / Filename:</label>
+        <input type="text" class="customTitle" placeholder="intro, warning, thank-you, etc.">
+
+        <label>Slide Text:</label>
+        <textarea class="customText" placeholder="Enter custom slide text"></textarea>
+
+        <label>Optional Custom Background PNG:</label>
+        <input type="file" class="customBg" accept="image/png,image/jpeg">
+
+        <button type="button" onclick="this.parentElement.remove()">Remove Slide</button>
+      `;
+
+      container.appendChild(box);
+    }
+
     async function generatePNGs() {
-      const fileInput = document.getElementById("bgUpload");
+      const defaultFile = document.getElementById("defaultBg").files[0];
       const songName = document.getElementById("songName").value.trim();
+      const authorName = document.getElementById("authorName").value.trim() || "PrincessTG";
       const lyricsText = document.getElementById("lyrics").value.trim();
 
-      if (!fileInput.files[0]) {
-        alert("Please upload a PNG background.");
+      if (!defaultFile) {
+        alert("Please upload a default background PNG.");
         return;
       }
 
@@ -75,26 +139,58 @@
         return;
       }
 
-      const bgImage = await loadImage(fileInput.files[0]);
-      const sections = lyricsText
+      const defaultBgImage = await loadImage(defaultFile);
+      const zip = new JSZip();
+      let fileNumber = 0;
+
+      const titleBlob = await createSlide(defaultBgImage, `${songName}\nby ${authorName}`, true);
+      zip.file(`${String(fileNumber).padStart(2, "0")}-title.png`, titleBlob);
+      fileNumber++;
+
+      const customSlides = Array.from(document.querySelectorAll(".slideBox"));
+
+      await addCustomSlidesToZip(customSlides, "before", zip, defaultBgImage, () => fileNumber++);
+
+      const lyricSections = lyricsText
         .split(/\n\s*\n/)
         .map(section => section.trim())
         .filter(section => section.length > 0);
 
-      const zip = new JSZip();
-
-      const titleSlide = `${songName}\nby PrincessTG`;
-      const titleBlob = await createSlide(bgImage, titleSlide, true);
-      zip.file("00-title.png", titleBlob);
-
-      for (let i = 0; i < sections.length; i++) {
-        const blob = await createSlide(bgImage, sections[i], false);
-        const fileName = String(i + 1).padStart(2, "0") + "-lyrics.png";
-        zip.file(fileName, blob);
+      for (let i = 0; i < lyricSections.length; i++) {
+        const blob = await createSlide(defaultBgImage, lyricSections[i], false);
+        zip.file(`${String(fileNumber).padStart(2, "0")}-lyrics-${String(i + 1).padStart(2, "0")}.png`, blob);
+        fileNumber++;
       }
 
+      await addCustomSlidesToZip(customSlides, "after", zip, defaultBgImage, () => fileNumber++);
+
       const zipBlob = await zip.generateAsync({ type: "blob" });
-      downloadBlob(zipBlob, `${songName}-lyric-slides.zip`);
+      downloadBlob(zipBlob, `${makeSafeFileName(songName)}-lyric-slides.zip`);
+    }
+
+    async function addCustomSlidesToZip(customSlides, position, zip, defaultBgImage, getNumber) {
+      for (const box of customSlides) {
+        const slidePosition = box.querySelector(".customPosition").value;
+        if (slidePosition !== position) continue;
+
+        const text = box.querySelector(".customText").value.trim();
+        if (!text) continue;
+
+        const label = box.querySelector(".customTitle").value.trim() || "custom-slide";
+        const customBgFile = box.querySelector(".customBg").files[0];
+
+        const bgImage = customBgFile
+          ? await loadImage(customBgFile)
+          : defaultBgImage;
+
+        const currentNumber = getNumber();
+        const blob = await createSlide(bgImage, text, false);
+
+        zip.file(
+          `${String(currentNumber).padStart(2, "0")}-${makeSafeFileName(label)}.png`,
+          blob
+        );
+      }
     }
 
     function loadImage(file) {
@@ -122,7 +218,7 @@
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        const fontSize = isTitle ? 82 : 58;
+        const fontSize = isTitle ? 58 : 40;
         ctx.font = `bold ${fontSize}px Arial`;
 
         drawWrappedText(
@@ -130,7 +226,7 @@
           text,
           canvas.width / 2,
           canvas.height / 2,
-          canvas.width * 0.78,
+          canvas.width * 0.82,
           fontSize * 1.35
         );
 
@@ -165,6 +261,13 @@
       lines.forEach((line, index) => {
         ctx.fillText(line, x, startY + index * lineHeight);
       });
+    }
+
+    function makeSafeFileName(name) {
+      return name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
     }
 
     function downloadBlob(blob, fileName) {
