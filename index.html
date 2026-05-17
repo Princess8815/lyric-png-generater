@@ -66,6 +66,8 @@
 
   <label>Author / Artist:</label>
   <input type="text" id="authorName" placeholder="PrincessTG">
+  <label>Text Color:</label>
+    <input type="color" id="textColor" value="#ffffff">
 
   <label>Lyrics:</label>
   <textarea id="lyrics" placeholder="Paste lyrics here. Separate sections with a blank line."></textarea>
@@ -83,202 +85,239 @@
 
   <canvas id="canvas" width="1280" height="720" style="display:none;"></canvas>
 
-  <script>
-    let customSlideCount = 0;
+<script>
+  let customSlideCount = 0;
 
-    function addCustomSlide() {
-      customSlideCount++;
+  function addCustomSlide() {
+    customSlideCount++;
 
-      const container = document.getElementById("customSlidesContainer");
+    const container = document.getElementById("customSlidesContainer");
 
-      const box = document.createElement("div");
-      box.className = "slideBox";
+    const box = document.createElement("div");
+    box.className = "slideBox";
 
-      box.innerHTML = `
-        <h3>Custom Slide ${customSlideCount}</h3>
+    box.innerHTML = `
+      <h3>Custom Slide ${customSlideCount}</h3>
 
-        <label>Where should this slide go?</label>
-        <select class="customPosition">
-          <option value="before">Before lyrics</option>
-          <option value="after">After lyrics</option>
-        </select>
+      <label>Where should this slide go?</label>
+      <select class="customPosition">
+        <option value="before">Before lyrics</option>
+        <option value="after">After lyrics</option>
+      </select>
 
-        <label>Slide Label / Filename:</label>
-        <input type="text" class="customTitle" placeholder="intro, warning, thank-you, etc.">
+      <label>Slide Label / Filename:</label>
+      <input type="text" class="customTitle" placeholder="intro, warning, thank-you, etc.">
 
-        <label>Slide Text:</label>
-        <textarea class="customText" placeholder="Enter custom slide text"></textarea>
+      <label>Slide Text:</label>
+      <textarea class="customText" placeholder="Enter custom slide text"></textarea>
 
-        <label>Optional Custom Background PNG:</label>
-        <input type="file" class="customBg" accept="image/png,image/jpeg">
+      <label>Optional Custom Background PNG:</label>
+      <input type="file" class="customBg" accept="image/png,image/jpeg">
 
-        <button type="button" onclick="this.parentElement.remove()">Remove Slide</button>
-      `;
+      <button type="button" onclick="this.parentElement.remove()">Remove Slide</button>
+    `;
 
-      container.appendChild(box);
+    container.appendChild(box);
+  }
+
+  async function generatePNGs() {
+    const defaultFile = document.getElementById("defaultBg").files[0];
+    const songName = document.getElementById("songName").value.trim();
+    const authorName = document.getElementById("authorName").value.trim() || "PrincessTG";
+    const lyricsText = document.getElementById("lyrics").value.trim();
+    const textColor = document.getElementById("textColor").value;
+
+    if (!defaultFile) {
+      alert("Please upload a default background PNG.");
+      return;
     }
 
-    async function generatePNGs() {
-      const defaultFile = document.getElementById("defaultBg").files[0];
-      const songName = document.getElementById("songName").value.trim();
-      const authorName = document.getElementById("authorName").value.trim() || "PrincessTG";
-      const lyricsText = document.getElementById("lyrics").value.trim();
+    if (!songName) {
+      alert("Please enter a song name.");
+      return;
+    }
 
-      if (!defaultFile) {
-        alert("Please upload a default background PNG.");
-        return;
-      }
+    if (!lyricsText) {
+      alert("Please paste lyrics.");
+      return;
+    }
 
-      if (!songName) {
-        alert("Please enter a song name.");
-        return;
-      }
+    const defaultBgImage = await loadImage(defaultFile);
+    const zip = new JSZip();
+    let fileNumber = 0;
 
-      if (!lyricsText) {
-        alert("Please paste lyrics.");
-        return;
-      }
+    const titleBlob = await createSlide(
+      defaultBgImage,
+      `${songName}\nby ${authorName}`,
+      true,
+      textColor
+    );
 
-      const defaultBgImage = await loadImage(defaultFile);
-      const zip = new JSZip();
-      let fileNumber = 0;
+    zip.file(`${String(fileNumber).padStart(2, "0")}-title.png`, titleBlob);
+    fileNumber++;
 
-      const titleBlob = await createSlide(defaultBgImage, `${songName}\nby ${authorName}`, true);
-      zip.file(`${String(fileNumber).padStart(2, "0")}-title.png`, titleBlob);
+    const customSlides = Array.from(document.querySelectorAll(".slideBox"));
+
+    await addCustomSlidesToZip(
+      customSlides,
+      "before",
+      zip,
+      defaultBgImage,
+      () => fileNumber++,
+      textColor
+    );
+
+    const lyricSections = lyricsText
+      .split(/\n\s*\n/)
+      .map(section => section.trim())
+      .filter(section => section.length > 0);
+
+    for (let i = 0; i < lyricSections.length; i++) {
+      const blob = await createSlide(
+        defaultBgImage,
+        lyricSections[i],
+        false,
+        textColor
+      );
+
+      zip.file(
+        `${String(fileNumber).padStart(2, "0")}-lyrics-${String(i + 1).padStart(2, "0")}.png`,
+        blob
+      );
+
       fileNumber++;
-
-      const customSlides = Array.from(document.querySelectorAll(".slideBox"));
-
-      await addCustomSlidesToZip(customSlides, "before", zip, defaultBgImage, () => fileNumber++);
-
-      const lyricSections = lyricsText
-        .split(/\n\s*\n/)
-        .map(section => section.trim())
-        .filter(section => section.length > 0);
-
-      for (let i = 0; i < lyricSections.length; i++) {
-        const blob = await createSlide(defaultBgImage, lyricSections[i], false);
-        zip.file(`${String(fileNumber).padStart(2, "0")}-lyrics-${String(i + 1).padStart(2, "0")}.png`, blob);
-        fileNumber++;
-      }
-
-      await addCustomSlidesToZip(customSlides, "after", zip, defaultBgImage, () => fileNumber++);
-
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      downloadBlob(zipBlob, `${makeSafeFileName(songName)}-lyric-slides.zip`);
     }
 
-    async function addCustomSlidesToZip(customSlides, position, zip, defaultBgImage, getNumber) {
-      for (const box of customSlides) {
-        const slidePosition = box.querySelector(".customPosition").value;
-        if (slidePosition !== position) continue;
+    await addCustomSlidesToZip(
+      customSlides,
+      "after",
+      zip,
+      defaultBgImage,
+      () => fileNumber++,
+      textColor
+    );
 
-        const text = box.querySelector(".customText").value.trim();
-        if (!text) continue;
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    downloadBlob(zipBlob, `${makeSafeFileName(songName)}-lyric-slides.zip`);
+  }
 
-        const label = box.querySelector(".customTitle").value.trim() || "custom-slide";
-        const customBgFile = box.querySelector(".customBg").files[0];
+  async function addCustomSlidesToZip(customSlides, position, zip, defaultBgImage, getNumber, textColor) {
+    for (const box of customSlides) {
+      const slidePosition = box.querySelector(".customPosition").value;
+      if (slidePosition !== position) continue;
 
-        const bgImage = customBgFile
-          ? await loadImage(customBgFile)
-          : defaultBgImage;
+      const text = box.querySelector(".customText").value.trim();
+      if (!text) continue;
 
-        const currentNumber = getNumber();
-        const blob = await createSlide(bgImage, text, false);
+      const label = box.querySelector(".customTitle").value.trim() || "custom-slide";
+      const customBgFile = box.querySelector(".customBg").files[0];
 
-        zip.file(
-          `${String(currentNumber).padStart(2, "0")}-${makeSafeFileName(label)}.png`,
-          blob
-        );
-      }
+      const bgImage = customBgFile
+        ? await loadImage(customBgFile)
+        : defaultBgImage;
+
+      const currentNumber = getNumber();
+
+      const blob = await createSlide(
+        bgImage,
+        text,
+        false,
+        textColor
+      );
+
+      zip.file(
+        `${String(currentNumber).padStart(2, "0")}-${makeSafeFileName(label)}.png`,
+        blob
+      );
     }
+  }
 
-    function loadImage(file) {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = URL.createObjectURL(file);
-      });
-    }
+  function loadImage(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = URL.createObjectURL(file);
+    });
+  }
 
-    function createSlide(bgImage, text, isTitle) {
-      return new Promise(resolve => {
-        const canvas = document.getElementById("canvas");
-        const ctx = canvas.getContext("2d");
+  function createSlide(bgImage, text, isTitle, textColor) {
+    return new Promise(resolve => {
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
 
-        ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        ctx.fillStyle = "white";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
+      ctx.fillStyle = textColor || "#ffffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
 
-        const fontSize = isTitle ? 58 : 40;
-        ctx.font = `bold ${fontSize}px Arial`;
+      const fontSize = isTitle ? 58 : 40;
+      ctx.font = `bold ${fontSize}px Arial`;
 
-        drawWrappedText(
-          ctx,
-          text,
-          canvas.width / 2,
-          canvas.height / 2,
-          canvas.width * 0.82,
-          fontSize * 1.35
-        );
+      drawWrappedText(
+        ctx,
+        text,
+        canvas.width / 2,
+        canvas.height / 2,
+        canvas.width * 0.82,
+        fontSize * 1.35
+      );
 
-        canvas.toBlob(blob => resolve(blob), "image/png");
-      });
-    }
+      canvas.toBlob(blob => resolve(blob), "image/png");
+    });
+  }
 
-    function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
-      const lines = [];
+  function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
+    const lines = [];
 
-      text.split("\n").forEach(paragraph => {
-        const words = paragraph.split(" ");
-        let line = "";
+    text.split("\n").forEach(paragraph => {
+      const words = paragraph.split(" ");
+      let line = "";
 
-        words.forEach(word => {
-          const testLine = line + word + " ";
-          const width = ctx.measureText(testLine).width;
+      words.forEach(word => {
+        const testLine = line + word + " ";
+        const width = ctx.measureText(testLine).width;
 
-          if (width > maxWidth && line !== "") {
-            lines.push(line.trim());
-            line = word + " ";
-          } else {
-            line = testLine;
-          }
-        });
-
-        lines.push(line.trim());
+        if (width > maxWidth && line !== "") {
+          lines.push(line.trim());
+          line = word + " ";
+        } else {
+          line = testLine;
+        }
       });
 
-      const startY = y - ((lines.length - 1) * lineHeight) / 2;
+      lines.push(line.trim());
+    });
 
-      lines.forEach((line, index) => {
-        ctx.fillText(line, x, startY + index * lineHeight);
-      });
-    }
+    const startY = y - ((lines.length - 1) * lineHeight) / 2;
 
-    function makeSafeFileName(name) {
-      return name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "");
-    }
+    lines.forEach((line, index) => {
+      ctx.fillText(line, x, startY + index * lineHeight);
+    });
+  }
 
-    function downloadBlob(blob, fileName) {
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-  </script>
+  function makeSafeFileName(name) {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function downloadBlob(blob, fileName) {
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+</script>
 
 </body>
 </html>
